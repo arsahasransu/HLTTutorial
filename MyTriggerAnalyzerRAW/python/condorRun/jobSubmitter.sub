@@ -1,0 +1,10 @@
+executable            = jobTemplate.sh
+arguments             = $(ProcId) 
+output                = /afs/cern.ch/work/a/asahasra/private/CMSSW_11_1_0/src/HLTTutorial/MyTriggerAnalyzerRAW/python/condorRun/output/jobOut_$(ProcId).out
+error                 = /afs/cern.ch/work/a/asahasra/private/CMSSW_11_1_0/src/HLTTutorial/MyTriggerAnalyzerRAW/python/condorRun/error/jobErr_$(ProcId).err
+log                   = /afs/cern.ch/work/a/asahasra/private/CMSSW_11_1_0/src/HLTTutorial/MyTriggerAnalyzerRAW/python/condorRun/log/jobLog_$(ProcId).log
+
++JobFlavour = "espresso"
+RequestCpus = 1
+
+queue 2
