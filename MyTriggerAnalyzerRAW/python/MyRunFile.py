@@ -76,7 +76,8 @@ process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(-1) )
 process.source = cms.Source("PoolSource",
     # replace 'myfile.root' with the source file you want to use
     fileNames = cms.untracked.vstring(
-        '/store/user/asahasra/EphemeralHLTPhysics1/SoftDisplacedPFHT_HLT_ARSahasransu_CustomRun1/201204_114655/0000/HLT2_HLT_1.root'
+#        'file:/eos/cms/store/data/Run2018D/EphemeralHLTPhysics1/RAW/v1/000/323/775/00000/0244D183-F28D-2741-9DBF-1638BEDC734E.root',
+        'root://xrootd-cms.infn.it///store/user/asahasra/EphemeralHLTPhysics1/SoftDisplacedPFHT_HLT_ARSahasransu_CustomRun1/201204_114655/0000/HLT2_HLT_1.root'
     )
 )
 
