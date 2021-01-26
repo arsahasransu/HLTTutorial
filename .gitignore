@@ -3,3 +3,5 @@
 *.err
 *.log
 *~
+*.root
+MyTriggerAnalyzerRAW/python/ObjectKine.root
