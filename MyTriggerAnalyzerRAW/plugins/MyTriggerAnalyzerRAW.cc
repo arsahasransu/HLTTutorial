@@ -44,6 +44,12 @@
 #include "DataFormats/VertexReco/interface/Vertex.h"
 #include "DataFormats/HLTReco/interface/TriggerFilterObjectWithRefs.h"
 #include "DataFormats/RecoCandidate/interface/RecoEcalCandidate.h"
+#include "DataFormats/RecoCandidate/interface/RecoChargedCandidate.h"
+#include "DataFormats/RecoCandidate/interface/RecoChargedCandidateFwd.h"
+
+#include "DataFormats/MuonSeed/interface/L3MuonTrajectorySeed.h"
+#include "DataFormats/MuonSeed/interface/L3MuonTrajectorySeedCollection.h"
+#include "DataFormats/HLTReco/interface/TriggerFilterObjectWithRefs.h"
 
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "CommonTools/UtilAlgos/interface/TFileService.h"
@@ -60,23 +66,36 @@
 // constructor "usesResource("TFileService");"
 // This will improve performance in multithreaded jobs.
 
+using namespace edm;
+using namespace reco;
+using namespace std;
+using namespace trigger;
+
 class MyTriggerAnalyzerRAW : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
-   public:
-      explicit MyTriggerAnalyzerRAW(const edm::ParameterSet&);
-      ~MyTriggerAnalyzerRAW();
-
-      static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
+public:
+  explicit MyTriggerAnalyzerRAW(const edm::ParameterSet&);
+  ~MyTriggerAnalyzerRAW();
   
-
-   private:
-      virtual void beginJob() override;
-      virtual void analyze(const edm::Event&, const edm::EventSetup&) override;
-      virtual void endJob() override;
-
+  static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
+  
+  
+private:
+  virtual void beginJob() override;
+  virtual void analyze(const edm::Event&, const edm::EventSetup&) override;
+  virtual void endJob() override;
+  int muondxy(const edm::Event&, const edm::EventSetup&, std::vector<double> &, std::vector<double> &);
+  
   edm::EDGetTokenT<edm::TriggerResults> trgresultsORIGToken_;
   //edm::EDGetTokenT<edm::TriggerResults> trgresultsHLT2Token_;
   edm::EDGetTokenT<trigger::TriggerEvent> trigobjectsRAWToken_;
   edm::EDGetTokenT<trigger::TriggerEvent> trigobjectsMyRAWToken_;
+
+  edm::EDGetTokenT<reco::BeamSpot> beamspotToken_;
+  // token identifying product contains muons
+  edm::EDGetTokenT<reco::RecoChargedCandidateCollection> candToken_; 
+  // token identifying product contains muons passing the previous level
+  //edm::InputTag muonL3Tag_;
+  //edm::EDGetTokenT<trigger::TriggerFilterObjectWithRefs> muonL3Token_;         
 
   edm::Service<TFileService> fs;
   TTree* hltObjects;
@@ -92,6 +111,9 @@ class MyTriggerAnalyzerRAW : public edm::one::EDAnalyzer<edm::one::SharedResourc
   std::vector<double> muOrig_phi;
   std::vector<double> muOrig_m;
   int muOrig_n;
+  std::vector<double> muCheck_pt;
+  std::vector<double> muCheck_dxy;
+  int muCheck_n;
   std::vector<double> ht_id;
   std::vector<double> ht_pt;
   std::vector<double> ht_eta;
@@ -99,6 +121,7 @@ class MyTriggerAnalyzerRAW : public edm::one::EDAnalyzer<edm::one::SharedResourc
   std::vector<double> ht_m;
   int ht_n;
   bool DoubleMu33NoFiltersNoVtxTrigBit;
+
 };
 
 //
@@ -113,6 +136,8 @@ class MyTriggerAnalyzerRAW : public edm::one::EDAnalyzer<edm::one::SharedResourc
 // constructors and destructor
 //
 MyTriggerAnalyzerRAW::MyTriggerAnalyzerRAW(const edm::ParameterSet& iConfig):
+  //muonL3Tag_(iConfig.getParameter<InputTag>("MuonL3CandTag")),
+  //muonL3Token_(consumes<trigger::TriggerFilterObjectWithRefs>(muonL3Tag_)),
   mu_id(),mu_pt(),mu_eta(),mu_phi(),mu_m(),mu_n(0),
   muOrig_id(),muOrig_pt(),muOrig_eta(),muOrig_phi(),muOrig_m(),muOrig_n(0),
   ht_id(),ht_pt(),ht_eta(),ht_phi(),ht_m(),ht_n(0){
@@ -121,6 +146,9 @@ MyTriggerAnalyzerRAW::MyTriggerAnalyzerRAW(const edm::ParameterSet& iConfig):
   //trgresultsHLT2Token_= consumes<edm::TriggerResults>( edm::InputTag("TriggerResults::HLT2") );
   trigobjectsRAWToken_=consumes<trigger::TriggerEvent>(edm::InputTag("hltTriggerSummaryAOD::HLT"));
   trigobjectsMyRAWToken_=consumes<trigger::TriggerEvent>(edm::InputTag("hltTriggerSummaryAOD::HLT2"));
+  beamspotToken_=consumes<reco::BeamSpot>(edm::InputTag("hltOnlineBeamSpot"));
+  candToken_=consumes<reco::RecoChargedCandidateCollection>(edm::InputTag("hltL3NoFiltersNoVtxMuonCandidates"));
+  //muonL3Token_=consumes<trigger::TriggerFilterObjectWithRefs>(edm::InputTag("hltL3fDimuonL1f0L2NVf16L3NoFiltersNoVtxFiltered16Displaced"));
 
   hltObjects = fs->make<TTree>("TrigObjects","TrigObjects");
   hltObjects->Branch("mu_id", &mu_id);
@@ -142,6 +170,9 @@ MyTriggerAnalyzerRAW::MyTriggerAnalyzerRAW(const edm::ParameterSet& iConfig):
   hltObjects->Branch("muOrig_phi", &muOrig_phi);
   hltObjects->Branch("muOrig_m", &muOrig_m);
   hltObjects->Branch("muOrig_n", &muOrig_n);
+  hltObjects->Branch("muCheck_pt", &muCheck_pt);
+  hltObjects->Branch("muCheck_dxy", &muCheck_dxy);
+  hltObjects->Branch("muCheck_n", &muCheck_n);
 }
 
 
@@ -178,6 +209,9 @@ MyTriggerAnalyzerRAW::analyze(const edm::Event& iEvent, const edm::EventSetup& i
    muOrig_eta.erase(muOrig_eta.begin(), muOrig_eta.end());
    muOrig_phi.erase(muOrig_phi.begin(), muOrig_phi.end());
    muOrig_m.erase(muOrig_m.begin(), muOrig_m.end());
+   muCheck_n = 0;
+   muCheck_pt.erase(muCheck_pt.begin(), muCheck_pt.end());
+   muCheck_pt.erase(muCheck_pt.begin(), muCheck_pt.end());
    ht_n = 0;
    ht_id.erase(ht_id.begin(), ht_id.end());
    ht_pt.erase(ht_pt.begin(), ht_pt.end());
@@ -231,12 +265,12 @@ MyTriggerAnalyzerRAW::analyze(const edm::Event& iEvent, const edm::EventSetup& i
    }
    */
    unsigned int nMuOrig = 0;
-   if (triggerObjectsSummary.isValid()) {
-     size_t filterIndex = (*triggerObjectsSummary).filterIndex( edm::InputTag("hltL3fDimuonL1f0L2NVf16L3NoFiltersNoVtxFiltered33Displaced","","HLT") );
+   if (myTriggerObjectsSummary.isValid()) {
+     size_t filterIndex = (*myTriggerObjectsSummary).filterIndex( edm::InputTag("hltL3fDimuonL1f0L2NVf16L3NoFiltersNoVtxFiltered16Displaced","","HLT2") );
      //std::cout<<filterIndex<<std::endl;
-     trigger::TriggerObjectCollection allTriggerObjects = triggerObjectsSummary->getObjects();
-     if (filterIndex < (*triggerObjectsSummary).sizeFilters()) { 
-       const trigger::Keys &keys = (*triggerObjectsSummary).filterKeys(filterIndex);
+     trigger::TriggerObjectCollection allTriggerObjects = myTriggerObjectsSummary->getObjects();
+     if (filterIndex < (*myTriggerObjectsSummary).sizeFilters()) { 
+       const trigger::Keys &keys = (*myTriggerObjectsSummary).filterKeys(filterIndex);
        nMuOrig = keys.size();
        trigger::TriggerObject foundObject = (allTriggerObjects)[keys[0]];
        for (size_t j = 0; j < nMuOrig; j++) {
@@ -250,28 +284,7 @@ MyTriggerAnalyzerRAW::analyze(const edm::Event& iEvent, const edm::EventSetup& i
        }
      }
    }
-   /*
-   unsigned int nBS = 0;
-   if (myTriggerObjectsSummary.isValid()) {
-     size_t filterIndex = (*myTriggerObjectsSummary).filterIndex( edm::InputTag("hltOnlineBeamSpot","","HLT2") );
-     //std::cout<<filterIndex<<std::endl;
-     trigger::TriggerObjectCollection allTriggerObjects = myTriggerObjectsSummary->getObjects();
-     if (filterIndex < (*myTriggerObjectsSummary).sizeFilters()) { 
-       const trigger::Keys &keys = (*myTriggerObjectsSummary).filterKeys(filterIndex);
-       nBS = keys.size();
-       trigger::TriggerObject foundObject = (allTriggerObjects)[keys[0]];
-       for (size_t j = 0; j < nBS; j++) {
-	 std::cout<<"BS \t"<<j<<"\t"<<std::endl;
-	 foundObject = (allTriggerObjects)[keys[j]];
-	 //mu_id.push_back(foundObject.id());
-	 //mu_pt.push_back(foundObject.pt());
-	 //mu_eta.push_back(foundObject.eta());
-	 //mu_phi.push_back(foundObject.phi());
-	 //mu_m.push_back(foundObject.mass());
-       }
-     }
-   }
-   */
+
    unsigned int nMu = 0;
    if (myTriggerObjectsSummary.isValid()) {
      size_t filterIndex = (*myTriggerObjectsSummary).filterIndex( edm::InputTag("hltL3fDimuonL1f0L2NVf16L3NoFiltersNoVtxFiltered16Displaced","","HLT2") );
@@ -295,7 +308,7 @@ MyTriggerAnalyzerRAW::analyze(const edm::Event& iEvent, const edm::EventSetup& i
    
    unsigned int nHt = 0;
    if (myTriggerObjectsSummary.isValid()) {
-     size_t filterIndex = (*myTriggerObjectsSummary).filterIndex( edm::InputTag("hltPFHT350Jet30","","HLT2") );
+     size_t filterIndex = (*myTriggerObjectsSummary).filterIndex( edm::InputTag("hltPFHT30Jet30","","HLT2") );
      //std::cout<<filterIndex<<std::endl;
      trigger::TriggerObjectCollection allTriggerObjects = myTriggerObjectsSummary->getObjects();
      if (filterIndex < (*myTriggerObjectsSummary).sizeFilters()) { 
@@ -318,7 +331,10 @@ MyTriggerAnalyzerRAW::analyze(const edm::Event& iEvent, const edm::EventSetup& i
    mu_n = nMu;
    ht_n = nHt;
 
+   muCheck_n = muondxy(iEvent, iSetup, muCheck_pt, muCheck_dxy);
+
    hltObjects->Fill();
+   
 }
 
 
@@ -340,8 +356,77 @@ MyTriggerAnalyzerRAW::fillDescriptions(edm::ConfigurationDescriptions& descripti
   //The following says we do not know what parameters are allowed so do no validation
   // Please change this to state exactly what you do use, even if it is no parameters
   edm::ParameterSetDescription desc;
-  desc.setUnknown();
+  desc.add<edm::InputTag>("MuonL3CandTag", edm::InputTag(""));
   descriptions.addDefault(desc);
+}
+
+// ------------ method to compute and store muon dxy ----------------
+int 
+MyTriggerAnalyzerRAW::muondxy(const edm::Event& iEvent, const edm::EventSetup& iSetup, std::vector<double> &pt, std::vector<double> &dxy) {
+
+  using namespace edm;
+  using namespace reco;
+  using namespace std;
+  using namespace trigger;
+  
+  // Read RecoChargedCandidates from L3MuonCandidateProducer:
+  Handle<RecoChargedCandidateCollection> mucands;
+  iEvent.getByToken(candToken_, mucands);
+  /*  
+  // Read L3 triggered objects:
+  Handle<trigger::TriggerFilterObjectWithRefs> muonL3Cands;
+  iEvent.getByToken(muonL3Token_, muonL3Cands);
+  vector<RecoChargedCandidateRef> vl3cands;
+  muonL3Cands->getObjects(trigger::TriggerMuon, vl3cands);
+  */
+  // Read BeamSpot information:
+  Handle<BeamSpot> recoBeamSpotHandle;
+  iEvent.getByToken(beamspotToken_, recoBeamSpotHandle);
+  const BeamSpot& beamSpot = *recoBeamSpotHandle;
+  
+  // Number of objects in the L3 Trigger:
+  int n = 0;
+
+  unsigned int maxI = mucands->size();
+  for (unsigned int i = 0; i != maxI; ++i) {
+    const TrackRef& tk = (*mucands)[i].track();
+    double absDxy = std::abs(tk->dxy(beamSpot.position()));
+    dxy.push_back(absDxy);
+    pt.push_back((*mucands)[i].pt());
+    n++;
+  }
+
+  /*
+  for (auto& vcand : vl3cands) {
+    
+    if (mucands->empty()) continue;
+    auto const& tk = (*mucands)[0].track();
+    bool useL3MTS = false;
+
+    if (tk->seedRef().isNonnull()) {
+      auto a = dynamic_cast<const L3MuonTrajectorySeed*>(tk->seedRef().get());
+      useL3MTS = a != nullptr;
+    }
+
+    if(useL3MTS) {
+      unsigned int maxI = mucands->size();
+      for (unsigned int i = 0; i != maxI; ++i) {
+	const TrackRef& tk = (*mucands)[i].track();
+	edm::Ref<L3MuonTrajectorySeedCollection> l3seedRef =
+	  tk->seedRef().castTo<edm::Ref<L3MuonTrajectorySeedCollection> >();
+	TrackRef staTrack = l3seedRef->l2Track();
+	if (vcand->get<TrackRef>() == staTrack) {
+	  double absDxy = std::abs(tk->dxy(beamSpot.position()));
+	  dxy.push_back(absDxy);
+	  pt.push_back((*mucands)[i].pt());
+	  n++;
+	  break;
+	}
+      } // end loop on mucands
+    } //end of useL3MTS
+  } // end loop on vl3cands 
+  */
+  return n;
 }
 
 //define this as a plug-in
